@@ -1,152 +1,71 @@
-=begin
-TIG (c) 2010-2013
-All Rights Reserved.
-THIS SOFTWARE IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
-WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
-###
-OBJexporter.rb
-###
-Usage: menu File > 'OBJexporter...'
-It Exports the Model in OBJ Format with an associated MTL file and a folder 
-of image-files [..._Textures] if appropriate.
-By default the files use the SKP's name with spaces etc squeezed out.
-By default the files and sub-folder are put into the SKP's folder.
-A starting dialog allows you to give an alternative filename/folder.
-You are asked if you want to make all Texture files in PNG format - Yes/No?
-By default everything in the SKP's active_entities, that's not Hidden and that's 
-on visible Layers will be Exported.  If there is a Selection you are prompted to 
-export the 'Selection Only' [Yes] or 'Everything Active/Visible' [No].
-By default the Units are in 'centimeters'.
-By default All Exported Faces are Triangulated .
-Note that 'distorted textures' are exported as new unique texture-files,
-distorted to match and re-UVmapped, like the Pro-OBJexporter - any scaled 
-or rotated textures are UVmapped appropriately using the main texture-file.
-Where possible shared-vertex data is reused ensuring correctly formed geometry. 
-This can mean that a SKP with 100,000 faces and potentially 300,000 vertices can 
-be 'compacted' to use perhaps 50,000 shared-vertices [but of course this depends 
-on the SKP's geometry, grouping etc]: this also reduces processing time [now 
-perhaps 60 seconds for this example], and when combined with optimized 
-numerical-entries, much smaller OBJ file sizes and faster processing in 
-3rd-party apps too.
-###
-Donations:
-By PayPal.com to info @ revitrev.org [paypal]3675634[/paypal]###
-Version:
-1.0 20101216 First issue.
-1.1 20110106 Image class method extensions only load if not already defined.
-1.2 20110224 Distorted textures are now exported correctly, with their own 
-             distorted 'unique texture' files [like the Pro-OBJexporter].
-1.3 20110225 Glitch with some distorted textures 'flipping' addressed.  
-             Materials and textures applied within and on to Groups or 
-             Instances now properly defined and UV-mapped.
-1.4 20110228 The new Filename now has spaces etc squeezed out.
-             Startup dialog added to allow Filename/Folder to be changed.
-             Glitches with reversals of some smoothed faces and materials 
-             occasionally missing from complex faces now addressed.
-             General speed and Status-Bar progress-reporting improved.
-1.5 20110323 Glitch with 'smoothed normals' addressed.
-1.6 20110402 Option to export all Texture files in PNG format added.
-1.7 20120118 Material images with no filetype now auto-revert to PNG.
-             Tolerance for deciding if 'distorted texture' relaxed.
-1.8 20120214 Fixed issues with flipped-instance reversed face vertices.
-1.9 20120215 Completely recoded. Issues with flipped-instance fully fixed.
-2.0 20120217 Tolerance checks for deciding if 'distorted texture' improved.
-2.1 20120220 Further work on avoiding the glitches with flipped-instances' 
-             face-reversal/orientation/UVmapping.
-2.2 20120220 Raw geometry hidden/off-layer merging during export resolved.
-2.3 20120221 Typo corrected ;{
-2.4 20120221 Recoded - speed ~v1.8, fixed flipped-instance face-reversal.
-2.5 20120221 Recoded - resolves nested [flipped] transformation and 
-             multiple-group-instances glitches etc.
-2.6 20120222 Recoded for speed improvement ~5%. Flipped/rotated instances 
-             transformations resolved for correct face orientation...
-             The MTL defaults now generally match the Pro exporter - 
-             specularity=0.333, but ambience=color etc.
-2.7 20121008 Alpha now set as d= and Tr= for cross-platform compatibility.
-             Coords' d.p. increased for accuracy. Option to Export Selection 
-             Only, if there is a selection. Active_entities exported, allowing 
-             just the contents of a group/component being edited to be exported; 
-             or the whole model if the context is model.entities.
-2.8 20130127 D.P. accuracy is not now applied to 'whole numbers'; -0 becomes 0; 
-             any shared-vertex entries are now 'reused'.
-2.9 20130130 Merging of shared-vertices is now optional, as it slows processing 
-             for larger models.
-3.0 20130131 Improved shared-vertex merging algorithm is now slightly faster 
-             than a non-merging version, so the option not to merge has been 
-             removed.  Notes updated.
-###
-=end
 require 'sketchup.rb'
 
-class Sketchup::Image
-    if not Sketchup::Image.method_defined?(:definition)
-      def definition()
-        if not self.valid?
-            puts("Image "+self.to_s+" is no longer valid.")
-            return false
-        end
-        self.model.definitions.each { |d| return d if d.image? && d.instances.include?(self)}
-        return nil
-      end
-    end
-
-    if not Sketchup::Image.method_defined?(:transformation)
-      def transformation()
-        if not self.valid?
-            puts("Image "+self.to_s+" is no longer valid.")
-            return false
-        end
-
-        origin = self.origin
-        axes = self.normal.axes
-        tr = Geom::Transformation.axes(ORIGIN, axes.at(0), axes.at(1), axes.at(2))
-        tr = tr*Geom::Transformation.rotation(ORIGIN, Z_AXIS, self.zrotation)
-        tr = (tr*Geom::Transformation.scaling(ORIGIN, self.width/self.pixelwidth, self.height/self.pixelheight, 1)).to_a
-        tr[12] = origin.x
-        tr[13] = origin.y
-        tr[14] = origin.z
-        return Geom::Transformation.new(tr)
-      end
-    end
-
-    if not Sketchup::Image.method_defined?(:transformation=)
-      def transformation=(tr)
-        if not self.valid?
-            puts("Image "+self.to_s+" is no longer valid.")
-            return false
-        end#if
-        if tr.class==Array
-          tr=Geom::Transformation.new(tr)
-        end#if
-        status=self.transform!(self.transformation.inverse * tr)
-        if status
-          return self
-        else
-          return nil
-        end#if
-      end
-    end#if
-end# Image class
-
-class Sketchup::Group
-    # Sometimes the group.entities.parent refer to the wrong definition.
-    # This checks for error and locates the correct parent definition.
-    if not Sketchup::Group.method_defined?(:definition)
-        def definition()
-          if self.entities.parent.instances.include?(self)
-            return self.entities.parent
-          else
-            Sketchup.active_model.definitions.each { |definition|
-                return definition if definition.instances.include?(self)
-            }
-          end
-          return nil # Should not happen.
-        end
-    end#if
-end# group class
-
-###########
+# class Sketchup::Image
+#     if not Sketchup::Image.method_defined?(:definition)
+#       def definition()
+#         if not self.valid?
+#             puts("Image "+self.to_s+" is no longer valid.")
+#             return false
+#         end
+#         self.model.definitions.each { |d| return d if d.image? && d.instances.include?(self)}
+#         return nil
+#       end
+#     end
+#
+#     if not Sketchup::Image.method_defined?(:transformation)
+#       def transformation()
+#         if not self.valid?
+#             puts("Image "+self.to_s+" is no longer valid.")
+#             return false
+#         end
+#
+#         origin = self.origin
+#         axes = self.normal.axes
+#         tr = Geom::Transformation.axes(ORIGIN, axes.at(0), axes.at(1), axes.at(2))
+#         tr = tr*Geom::Transformation.rotation(ORIGIN, Z_AXIS, self.zrotation)
+#         tr = (tr*Geom::Transformation.scaling(ORIGIN, self.width/self.pixelwidth, self.height/self.pixelheight, 1)).to_a
+#         tr[12] = origin.x
+#         tr[13] = origin.y
+#         tr[14] = origin.z
+#         return Geom::Transformation.new(tr)
+#       end
+#     end
+#
+#     if not Sketchup::Image.method_defined?(:transformation=)
+#       def transformation=(tr)
+#         if not self.valid?
+#             puts("Image "+self.to_s+" is no longer valid.")
+#             return false
+#         end#if
+#         if tr.class==Array
+#           tr=Geom::Transformation.new(tr)
+#         end#if
+#         status=self.transform!(self.transformation.inverse * tr)
+#         if status
+#           return self
+#         else
+#           return nil
+#         end#if
+#       end
+#     end#if
+# end# Image class
+#
+# class Sketchup::Group
+#     # Sometimes the group.entities.parent refer to the wrong definition.
+#     # This checks for error and locates the correct parent definition.
+#     if not Sketchup::Group.method_defined?(:definition)
+#         def definition()
+#           if self.entities.parent.instances.include?(self)
+#             return self.entities.parent
+#           else
+#             Sketchup.active_model.definitions.each { |definition|
+#                 return definition if definition.instances.include?(self)
+#             }
+#           end
+#           return nil # Should not happen.
+#         end
+#     end#if
+# end# group class
 
 class OBJexporter
 
@@ -160,11 +79,11 @@ class OBJexporter
         end
 
         @project_path = File.dirname(path)
-        @title = @model.title.gsub(/[^0-9A-Za-z_-]/, "_")
+        @title = self.fix_name(@model.title)
         @base_name = @title
 
         ### save dialog
-        result = UI.savepanel("OBJexporter - File Name ?", @project_path, @base_name + ".obj")
+        result = UI.savepanel("OBJExporter - File Name?", @project_path, @base_name + ".obj")
 
         return nil if not result or result == ""
 
@@ -172,7 +91,7 @@ class OBJexporter
 
         if @sel and @sel[0]
             UI.beep
-            if UI.messagebox("OBJexporter:\n\nYES\t=\tSelection Only...\nNO\t=\tEverything Active/Visible...\n", MB_YESNO)==6
+            if UI.messagebox("OBJExporter:\n\nYES\t=\tSelection Only...\nNO\t=\tEverything Active/Visible...\n", MB_YESNO)==6
                 @use_sel = true
             else
                 @use_sel = false
@@ -183,13 +102,13 @@ class OBJexporter
 
         ### PNG?
         UI.beep
-        if UI.messagebox("OBJExporter:\n\nConvert ALL Texture Files to PNG ?\n",MB_YESNO,"")==6 ### 6=YES
+        if UI.messagebox("OBJExporter:\n\nConvert ALL Texture Files to PNG ?\n", MB_YESNO, "") == 6 ### 6=YES
           @png = true
         else
           @png = false
         end
 
-        @base_name = File.basename(result, ".*").gsub(/[^0-9A-Za-z_-]/, "_")
+        @base_name = self.fix_name(File.basename(result, ".*"))
         @project_path = File.dirname(result)
 
         @all_mats = [nil] ### for 'default'
@@ -197,7 +116,7 @@ class OBJexporter
 
         saved_names = []
         @model.materials.to_a.each do | mat |
-          mat_name = mat.display_name.gsub(/ /, '_').gsub(/[^0-9A-Za-z_-]/, '')
+          mat_name = self.fix_name(mat.display_name)
           saved_name = File.basename(mat_name)
           saved_name_uniq = self.make_name_unique(saved_names, saved_name)
           saved_names << saved_name_uniq
@@ -208,11 +127,15 @@ class OBJexporter
         self.export()
     end
 
+    def fix_name(name)
+        return name.gsub(/[^0-9A-Za-z_-]/, "_")
+    end
+
     def export()
         @obj_name = @base_name + ".obj"
 
         @obj_filepath = File.join(@project_path, @obj_name)
-        @mtllib = @base_name+".mtl"
+        @mtllib = @base_name + ".mtl"
         @mtl_file = File.join(@project_path, @mtllib)
         @textures_name = @base_name + "_Textures"
         @textures_path = File.join(@project_path, @textures_name)
@@ -220,7 +143,6 @@ class OBJexporter
         @used_vts = {}
         @used_vns = {}
         @used_materials = []
-        @dmats = []
 
         puts(@msg)
         puts(@obj_filepath.tr("\\","/"))
@@ -235,7 +157,7 @@ class OBJexporter
     end
     
     def export_start()
-        @model.start_operation("OBJexporter") ###############################
+        @model.start_operation("OBJExporter") ###############################
 
         if @use_sel
             ents = @sel.to_a
@@ -248,7 +170,7 @@ class OBJexporter
 
         @obj_file = File.new(@obj_filepath, "w")
         @obj_file.puts("# Alias Wavefront OBJ File Exported from SketchUp")
-        @obj_file.puts("# with OBJexporter (c) 2013 TIG")
+        @obj_file.puts("# https://github.com/marrony/sketchup-unreal-objexporter")
         @obj_file.puts("# Units = centimeters")
         @obj_file.puts
         @obj_file.puts("mtllib #{@mtllib}")
@@ -270,9 +192,13 @@ class OBJexporter
 
     def export_obj(ents)
         entities = ents.find_all do | entity |
-            next unless entity.valid? #or entity.hidden? or not entity.layer.visible?
+            next unless entity.valid?
 
             entity.class == Sketchup::Group or entity.class == Sketchup::ComponentInstance
+        end
+
+        entities = entities.find_all do | entity |
+            not entity.hidden? and entity.layer.visible?
         end
 
         definitions = entities.map do | entity |
@@ -281,9 +207,7 @@ class OBJexporter
 
         ot = Geom::Transformation.new()
         definitions.uniq.each do | d |
-            next if d.hidden? or not d.layer.visible?
-
-            objname = @title + "-COM-" + d.name
+            objname = @title + "-" + d.name
 
             self.open_group(objname)
             self.export_component_definition(d, ot)
@@ -295,101 +219,23 @@ class OBJexporter
       return Geom::Point3d.new(uvq.x / uvq.z, uvq.y / uvq.z, 1.0)
     end
 
-    #todo(marrony): generalize export_group() and export_component_instance()
-    def export_group(gp, tr=nil, mat=nil)
-        log('Export Group', gp.definition.to_s)
+    def export_group(gp, tr = nil, mat = nil)
+#         gp.make_unique if gp.entities.parent.instances[1]
 
-        return if gp.hidden? or not gp.layer.visible?
-        gp.make_unique if gp.entities.parent.instances[1]
-        gp.locked=false
-        tc=gp.transformation
-        ###
-        tca=tc.to_a
-        ssx=tca[0].to_s
-        ssy=tca[5].to_s
-        ssz=tca[10].to_s
-        if ssx=="-0.0"
-          tca[0]= -0.000000001
-        end
-        if ssy=="-0.0"
-          tca[5]= -0.000000001
-        end
-        if ssz=="-0.0"
-          tca[10]= -0.000000001
-        end
-        tc=Geom::Transformation.new(tca)
-        ###
-        ot=tc
-        ot=tr*tc if tr!=nil
-        sx=ot.to_a[0]
-        sy=ot.to_a[5]
-        sz=ot.to_a[10]
-        if sx>0 and sy>0 and sz>0
-          flipped=false
-        elsif sx<0 and sy<0 and sz<0
-          flipped=true
-        elsif sx<0 and sy>=0 and sz>0
-          flipped=true
-        elsif sx<0 and sy>0 and sz>=0
-          flipped=true
-        elsif sx>=0 and sy<0 and sz>0
-          flipped=true
-        elsif sx>0 and sy<0 and sz>=0
-          flipped=true
-        elsif sx>=0 and sy>0 and sz<0
-          flipped=true
-        elsif sx>0 and sy>=0 and sz<0
-          flipped=true
-        else
-          flipped=false
-        end
+        gp.locked = false
+        tc = gp.transformation
 
-        if flipped
-          texture_writer=Sketchup.create_texture_writer
-          faces=gp.entities.find_all{|e|e.class==Sketchup::Face}
-          faces.each{|face|
-            if not face.material or face.material.texture==nil
-              face.back_material=face.material
-              face.reverse!
-            else
-              samples = []
-              samples << face.vertices[0].position             ### 0,0 | Origin
-              samples << samples[0].offset(face.normal.axes.x) ### 1,0 | Offset Origin in X
-              samples << samples[0].offset(face.normal.axes.y) ### 0,1 | Offset Origin in Y
-              samples << samples[1].offset(face.normal.axes.y) ### 1,1 | Offset X in Y
-              xyz= []
-              uv = []### Arrays containing 3D and UV points.
-              uvh = face.get_UVHelper(true, true, texture_writer)
-              samples.each { |position|
-                xyz << position ### XYZ 3D coordinates
-                uvq = uvh.get_front_UVQ(position) ### UV 2D coordinates
-                uv << self.flattenUVQ(uvq)
-              }
-              pts = [] ### Position texture.
-              (0..3).each { |i|
-                 pts << xyz[i]
-                 pts << uv[i]
-              }
-              mat=face.material
-              face.position_material(mat, pts, false)
-              face.reverse!
-              face.position_material(mat, pts, true)
-            end
-          }
-        end
-        defmat=mat
-        defmat=gp.material if gp.material
-        @used_materials << defmat
-
-        self.export_entities(gp.entities, ot, defmat)
+        self.export_component_definition(gp.definition, tc, tr, mat)
     end
      
-    def export_component_instance(ci, tr=nil, mat=nil)
-        return if ci.hidden? or not ci.layer.visible?
-
+    def export_component_instance(ci, tr = nil, mat = nil)
         ci.locked = false
         tc = ci.transformation
 
+        self.export_component_definition(ci.definition, tc, tr, mat)
+    end
+
+    def export_component_definition(definition, tc, tr = nil, mat = nil)
         tca = tc.to_a
 
         if tca[0].to_s == "-0.0"
@@ -437,58 +283,53 @@ class OBJexporter
         if flipped
           texture_writer = Sketchup.create_texture_writer
 
-          if ci.definition.instances[1]
+          if definition.instances[1]
             log('Make Unique', ci.to_s)
           end
 
-          ci.make_unique if ci.definition.instances[1]
+#           definition.parent.make_unique if definition.instances[1]
 
-          faces = ci.definition.entities.find_all { | e |
+          faces = definition.entities.find_all do | e |
             e.class == Sketchup::Face
-          }
+          end
 
-          faces.each { | face |
-            if not face.material or face.material.texture == nil
-              face.back_material = face.material
-              face.reverse!
-            else
-              samples = []
-              samples << face.vertices[0].position             ### 0,0 | Origin
-              samples << samples[0].offset(face.normal.axes.x) ### 1,0 | Offset Origin in X
-              samples << samples[0].offset(face.normal.axes.y) ### 0,1 | Offset Origin in Y
-              samples << samples[1].offset(face.normal.axes.y) ### 1,1 | Offset X in Y
+          faces.each do | face |
+              if not face.material or face.material.texture == nil
+                face.back_material = face.material
+                face.reverse!
+              else
+                samples = []
+                samples << face.vertices[0].position             ### 0,0 | Origin
+                samples << samples[0].offset(face.normal.axes.x) ### 1,0 | Offset Origin in X
+                samples << samples[0].offset(face.normal.axes.y) ### 0,1 | Offset Origin in Y
+                samples << samples[1].offset(face.normal.axes.y) ### 1,1 | Offset X in Y
 
-              xyz = []
-              uv  = [] ### Arrays containing 3D and UV points.
-              uvh = face.get_UVHelper(true, true, texture_writer)
-              samples.each do | position |
-                xyz << position ### XYZ 3D coordinates
-                uvq = uvh.get_front_UVQ(position) ### UV 2D coordinates
-                uv << self.flattenUVQ(uvq)
+                xyz = []
+                uv  = [] ### Arrays containing 3D and UV points.
+                uvh = face.get_UVHelper(true, true, texture_writer)
+                samples.each do | position |
+                  xyz << position ### XYZ 3D coordinates
+                  uvq = uvh.get_front_UVQ(position) ### UV 2D coordinates
+                  uv << self.flattenUVQ(uvq)
+                end
+
+                pts = [] ### Position texture.
+
+                (0..3).each do |i|
+                   pts << xyz[i]
+                   pts << uv[i]
+                end
+
+                mat = face.material
+                face.position_material(mat, pts, false)
+                face.reverse!
+                face.position_material(mat, pts, true)
               end
-
-              pts = [] ### Position texture.
-
-              (0..3).each { |i|
-                 pts << xyz[i]
-                 pts << uv[i]
-              }
-
-              mat = face.material
-              face.position_material(mat, pts, false)
-              face.reverse!
-              face.position_material(mat, pts, true)
-            end
-          }
+          end
         end
 
         defmat = mat
-        defmat = ci.material if ci.material
-
-        self.export_component_definition(ci.definition, ot, defmat)
-    end
-
-    def export_component_definition(definition, ot, defmat = nil)
+        defmat = definition.material if definition.material
         @used_materials << defmat
 
         self.export_entities(definition.entities, ot, defmat)
@@ -582,6 +423,8 @@ class OBJexporter
             if not mat
               mat = defmat
               if defn != @model and defmat and defmat.texture
+                #todo(marrony): Understand what this code is doing
+
                 log('Export Faces', 'Remap?')
 
                 ### re-map - it's on an Instance/Group 
@@ -626,8 +469,7 @@ class OBJexporter
 
         mat_name = self.find_material_name(mat)
 
-        ot = Geom::Transformation.new()
-        ot = tr if tr != nil
+        tr = Geom::Transformation.new() if tr == nil
 
         if meshes.length != 0 and vs.length != 0
             @obj_file.puts("usemtl #{mat_name}")
@@ -636,16 +478,8 @@ class OBJexporter
             kvt = []
             kvn = []
 
-            vs_transformed = vs.map { | v | ot * v }
-            min = vs_transformed[0]
-
-            vs_transformed.each do | v |
-                min = v if v.x < min.x and v.y < min.y and v.z < min.z
-            end
-
             vs.each do | v |
-                v = ot * v
-                #v = v - min
+                v = tr * v
                 xx = v.x
                 yy = v.y
                 zz = v.z
@@ -726,8 +560,6 @@ class OBJexporter
     end
     
     def export_textures()
-        log('Export Textures', @used_materials.to_s)
-
         txtr = @used_materials.compact.uniq.any? do | mat |
             mat.texture != nil
         end
@@ -783,10 +615,11 @@ class OBJexporter
     end
 
     def export_mtl_material()
-        ffcol=@model.rendering_options["FaceFrontColor"]
-        mtl_file=File.new(@mtl_file,"w")
+        ffcol = @model.rendering_options["FaceFrontColor"]
+
+        mtl_file = File.new(@mtl_file,"w")
         mtl_file.puts("# Alias Wavefront MTL File Exported from SketchUp")
-        mtl_file.puts("# with OBJexporter (c) 2013 TIG")
+        mtl_file.puts("# https://github.com/marrony/sketchup-unreal-objexporter")
         mtl_file.puts("# Made for '"+@obj_name+"'")
         mtl_file.puts
         mtl_file.puts("newmtl Default_Material")
@@ -799,7 +632,7 @@ class OBJexporter
         mtl_file.puts
 
         @used_materials.uniq!
-        @used_materials.each{|mat|
+        @used_materials.each do | mat |
             next if not mat
 
             matname = self.find_material_name(mat)
@@ -818,43 +651,16 @@ class OBJexporter
             end
 
             self.append_mtl(mtl_file, mat, matname, texture_path)
-        }
-        ### do any distorts
-        self.distorted_mtl(mtl_file) if @dmats[0]
-        ###
+        end
+
         mtl_file.puts("#EOF")
-        ###
         mtl_file.flush
         mtl_file.close
     end
 
-    def distorted_mtl(mtl_file)
-        ###
-        mtl_file.puts("#Distorted-Textures\n")
-        ###
-        @dmats.each{|ar|
-            face=ar[0]
-            mat=ar[1]
-            matname=ar[2]
-            if mat and mat.texture
-                if @png
-                  texture_extn='.PNG'
-                else
-                  texture_extn=File.extname(mat.texture.filename)
-                  texture_extn='.PNG' if texture_extn.empty?
-                  itypes=['.png','.jpg','.bmp','.tif','.psd','.tga']
-                  texture_extn='.PNG' unless itypes.include?(texture_extn.downcase)
-                end#if
-                texture_path=File.join(@textures_name, matname + texture_extn)
-            end
-
-            self.append_mtl(mtl_file, mat, matname, texture_path)
-            self.export_distorted_texture(face, texture_path)
-        }
-    end
-
     def append_mtl(mtl_file, mat, matname, texture_path)
        mtl_file.puts("newmtl #{matname}")
+
        if not mat.use_alpha?
            mtl_file.puts("Ka " + mat.color.to_a[0..2].collect{|c| "%.6g" % ((c.to_f/255)) }.join(" "))
            mtl_file.puts("Kd " + mat.color.to_a[0..2].collect{|c| "%.6g" % ((c.to_f/255)) }.join(" "))
@@ -872,6 +678,7 @@ class OBJexporter
            mtl_file.puts("Tr #{"%.3g" % mat.alpha }")
            mtl_file.puts("map_Kd #{texture_path}") if texture_path
        end
+
        mtl_file.puts
     end
 
