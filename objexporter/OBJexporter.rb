@@ -164,84 +164,64 @@ class OBJexporter
         @base_name = @title
 
         ### save dialog
-        result=UI.savepanel("OBJexporter - File Name ?", @project_path, @base_name+".obj")
-        return nil if not result or result==""
-        @sel=@model.selection
+        result = UI.savepanel("OBJexporter - File Name ?", @project_path, @base_name + ".obj")
+
+        return nil if not result or result == ""
+
+        @sel = @model.selection
+
         if @sel and @sel[0]
             UI.beep
             if UI.messagebox("OBJexporter:\n\nYES\t=\tSelection Only...\nNO\t=\tEverything Active/Visible...\n", MB_YESNO)==6
-                @use_sel=true
+                @use_sel = true
             else
-                @use_sel=false
+                @use_sel = false
             end
         else
-            @use_sel=false
+            @use_sel = false
         end
+
         ### PNG?
         UI.beep
         if UI.messagebox("OBJExporter:\n\nConvert ALL Texture Files to PNG ?\n",MB_YESNO,"")==6 ### 6=YES
-          @png=true
+          @png = true
         else
-          @png=false
-        end#if
-        ###
-        @base_name=File.basename(result, ".*").gsub(/[^0-9A-Za-z_-]/, "_")
-        @project_path=File.dirname(result)
-        ### set up mat list
-        @all_mats=[nil] ### for 'default'
-        mats=@model.materials.to_a
-        @mats=[]
-        @saved_names=[]
-        mats.each{|mat|
-          mat_name=mat.display_name.gsub(/ /, '_').gsub(/[^0-9A-Za-z_-]/, '')
-          saved_name=File.basename(mat_name)
-          saved_name_uniq=self.make_name_unique(@saved_names, saved_name)
-          @saved_names << saved_name_uniq
+          @png = false
+        end
+
+        @base_name = File.basename(result, ".*").gsub(/[^0-9A-Za-z_-]/, "_")
+        @project_path = File.dirname(result)
+
+        @all_mats = [nil] ### for 'default'
+        @mats = []
+
+        saved_names = []
+        @model.materials.to_a.each do | mat |
+          mat_name = mat.display_name.gsub(/ /, '_').gsub(/[^0-9A-Za-z_-]/, '')
+          saved_name = File.basename(mat_name)
+          saved_name_uniq = self.make_name_unique(saved_names, saved_name)
+          saved_names << saved_name_uniq
           @mats << [mat, saved_name_uniq]
           @all_mats << mat
-        }
-        defns=@model.definitions
-        img_mats=[]; @imgs=[]
-        defns.each{|defn|
-          next if not defn.image?
-          face=nil
-          defn.entities.each {|e|
-            if e.class==Sketchup::Face
-              face=e
-              break
-            end#if
-          }
-          next if not face
-          mat=face.material
-          mat_name=mat.display_name.gsub(/ /, '_').gsub(/[^0-9A-Za-z_-]/, '')
-          saved_name=File.basename(mat_name)
-          saved_name_uniq=self.make_name_unique(@saved_names, saved_name)
-          @saved_names << saved_name_uniq
-          @imgs << [mat, saved_name_uniq]
-          @all_mats << mat
-        }
-        ### get settings etc...
+        end
+
         self.export()
-        ###
     end
 
     def export()
-        @obj_name = @base_name+".obj"
-        Sketchup.set_status_text(@obj_name)
+        @obj_name = @base_name + ".obj"
 
         @obj_filepath = File.join(@project_path, @obj_name)
         @mtllib = @base_name+".mtl"
         @mtl_file = File.join(@project_path, @mtllib)
-        @textures_name = @base_name+"_Textures"
+        @textures_name = @base_name + "_Textures"
         @textures_path = File.join(@project_path, @textures_name)
         @used_vs = {}
         @used_vts = {}
         @used_vns = {}
         @used_materials = []
-        @distorted = []
         @dmats = []
 
-        @msg="OBJExporter: "; Sketchup.set_status_text(@msg)
         puts(@msg)
         puts(@obj_filepath.tr("\\","/"))
 
@@ -249,9 +229,8 @@ class OBJexporter
         self.export_start()
         end_time = (((Time.now.to_f - start_time)*10000).to_i/10000.0).to_f.to_s
 
-        @msg="OBJexporter: Completed in #{end_time} seconds"
-        Sketchup.set_status_text(@msg)
-        UI.beep; puts(@msg)
+        UI.beep
+        puts("OBJexporter: Completed in #{end_time} seconds")
         ###
     end
     
@@ -259,87 +238,57 @@ class OBJexporter
         @model.start_operation("OBJexporter") ###############################
 
         if @use_sel
-            @ents = @sel.to_a
+            ents = @sel.to_a
         else
             #while @model.active_entities != @model.entities
               #@model.close_active
             #end
-            @ents = @model.active_entities.to_a
+            ents = @model.active_entities.to_a
         end
 
         @obj_file = File.new(@obj_filepath, "w")
         @obj_file.puts("# Alias Wavefront OBJ File Exported from SketchUp")
         @obj_file.puts("# with OBJexporter (c) 2013 TIG")
-        @obj_file.puts("# Units = meters")
+        @obj_file.puts("# Units = centimeters")
         @obj_file.puts
         @obj_file.puts("mtllib #{@mtllib}")
         @obj_file.puts
-
-        @msg << '. '; Sketchup.set_status_text(@msg)
-        self.export_obj()
+        self.export_obj(ents)
         @obj_file.puts("#EOF")
-        @obj_file.flush if @obj_file
-        @obj_file.close if @obj_file
+        @obj_file.flush
+        @obj_file.close
 
-        @msg<<'. '; Sketchup.set_status_text(@msg)
         self.export_textures()
-        @msg<<'. '; Sketchup.set_status_text(@msg)
         self.export_mtl_material()
-        @msg<<'. '; Sketchup.set_status_text(@msg)
 
-        @model.abort_operation ##############################################
+        @model.abort_operation
     end
 
     def log(tag, msg)
         puts(tag.to_s + ': ' + msg.to_s)
     end
 
-    def export_obj()
-        log('Export Obj', 'Begin')
+    def export_obj(ents)
+        entities = ents.find_all do | entity |
+            next unless entity.valid? #or entity.hidden? or not entity.layer.visible?
 
-        @img_mats = []
-        objname = @title + "-SKP"
-
-        faces = @ents.find_all { |e|
-            next unless e.valid?
-            e.class == Sketchup::Face
-        }
-
-        log('Export Obj', 'Faces ' + faces.to_s)
-
-        if faces[0]
-            @msg << '. '; Sketchup.set_status_text(@msg)
-            self.export_faces(faces, objname)
+            entity.class == Sketchup::Group or entity.class == Sketchup::ComponentInstance
         end
 
-        @tr = Geom::Transformation.new()
+        definitions = entities.map do | entity |
+            entity.definition
+        end
 
-        @msg << '. '; Sketchup.set_status_text(@msg)
+        ot = Geom::Transformation.new()
+        definitions.uniq.each do | d |
+            next if d.hidden? or not d.layer.visible?
 
-        images = @ents.find_all { | e |
-            next unless e.valid?
-            e.class == Sketchup::Image
-        }
-        log('Export Obj', 'Images ' + images.to_s)
-        images.each { | ci | self.export_image(ci, @tr) }
+            objname = @title + "-COM-" + d.name
 
-        @msg << '. '; Sketchup.set_status_text(@msg)
-        groups = @ents.find_all { | e |
-            next unless e.valid?
-            e.class == Sketchup::Group
-        }
-        log('Export Obj', 'Groups ' + groups.to_s)
-        groups.each { | gp | self.export_group(gp, @tr) }
-
-        @msg << '. '; Sketchup.set_status_text(@msg)
-        components = @ents.find_all { | e |
-            next unless e.valid?
-            e.class == Sketchup::ComponentInstance
-        }
-        log('Export Obj', 'Components ' + components.to_s)
-        components.each { | ci | self.export_component_instance(ci, @tr) }
-
-        log('Export Obj', 'End')
+            self.open_group(objname)
+            self.export_component_definition(d, ot)
+            self.close_group()
+        end
     end
     
     def flattenUVQ(uvq) ### Get UV coordinates from UVQ matrix.
@@ -348,6 +297,8 @@ class OBJexporter
 
     #todo(marrony): generalize export_group() and export_component_instance()
     def export_group(gp, tr=nil, mat=nil)
+        log('Export Group', gp.definition.to_s)
+
         return if gp.hidden? or not gp.layer.visible?
         gp.make_unique if gp.entities.parent.instances[1]
         gp.locked=false
@@ -392,8 +343,9 @@ class OBJexporter
         else
           flipped=false
         end
-        texture_writer=Sketchup.create_texture_writer
+
         if flipped
+          texture_writer=Sketchup.create_texture_writer
           faces=gp.entities.find_all{|e|e.class==Sketchup::Face}
           faces.each{|face|
             if not face.material or face.material.texture==nil
@@ -428,17 +380,8 @@ class OBJexporter
         defmat=mat
         defmat=gp.material if gp.material
         @used_materials << defmat
-        name=gp.entityID.to_s
-        name=gp.name+"-"+name unless gp.name.empty?
-        name.gsub!(/[^0-9A-Za-z_-]/, "_")
-        objname=@title+"-GRP-"+name
-        @msg<<'. '; Sketchup.set_status_text(@msg)
-        if gp.entities.find{|e|e.class==Sketchup::Face}
-          self.export_faces(gp.entities.find_all{|e|e.class==Sketchup::Face}, objname, ot, defmat)
-        end
-        gp.entities.find_all{|e|next unless e.valid?; e.class==Sketchup::Image}.each{|f| self.export_image(f, ot) }
-        gp.entities.find_all{|e|next unless e.valid?; e.class==Sketchup::Group}.each{|f| self.export_group(f, ot, defmat) }
-        gp.entities.find_all{|e|next unless e.valid?; e.class==Sketchup::ComponentInstance}.each{|f| self.export_component_instance(f, ot, defmat) }
+
+        self.export_entities(gp.entities, ot, defmat)
     end
      
     def export_component_instance(ci, tr=nil, mat=nil)
@@ -450,53 +393,57 @@ class OBJexporter
         tca = tc.to_a
 
         if tca[0].to_s == "-0.0"
-          tca[0]= -0.000000001
+          tca[0] = -0.000000001
         end
 
         if tca[5].to_s == "-0.0"
-          tca[5]= -0.000000001
+          tca[5] = -0.000000001
         end
 
         if tca[10].to_s == "-0.0"
-          tca[10]= -0.000000001
+          tca[10] = -0.000000001
         end
 
         tc = Geom::Transformation.new(tca)
 
-        ot=tc
-        ot=tr*tc if tr!=nil
-        sx=ot.to_a[0]
-        sy=ot.to_a[5]
-        sz=ot.to_a[10]
+        ot = tc
+        ot = tr*tc if tr != nil
+        sx = ot.to_a[0]
+        sy = ot.to_a[5]
+        sz = ot.to_a[10]
 
+        #is flipped=true when a component is negative?
         if sx>0 and sy>0 and sz>0
-          flipped=false
+          flipped = false
         elsif sx<0 and sy<0 and sz<0
-          flipped=true
+          flipped = true
         elsif sx<0 and sy>=0 and sz>0
-          flipped=true
+          flipped = true
         elsif sx<0 and sy>0 and sz>=0
-          flipped=true
+          flipped = true
         elsif sx>=0 and sy<0 and sz>0
-          flipped=true
+          flipped = true
         elsif sx>0 and sy<0 and sz>=0
-          flipped=true
+          flipped = true
         elsif sx>=0 and sy>0 and sz<0
-          flipped=true
+          flipped = true
         elsif sx>0 and sy>=0 and sz<0
-          flipped=true
+          flipped = true
         else
-          flipped=false
+          flipped = false
         end
 
-        texture_writer = Sketchup.create_texture_writer
-
-        log('Export Component', 'Flipped: ' + flipped.to_s)
-
+        #todo(marrony): looks like flipped is true when scale is negative, maybe remove this
         if flipped
+          texture_writer = Sketchup.create_texture_writer
+
+          if ci.definition.instances[1]
+            log('Make Unique', ci.to_s)
+          end
+
           ci.make_unique if ci.definition.instances[1]
 
-          faces = ci.definition.entities.find_all{ | e |
+          faces = ci.definition.entities.find_all { | e |
             e.class == Sketchup::Face
           }
 
@@ -514,11 +461,11 @@ class OBJexporter
               xyz = []
               uv  = [] ### Arrays containing 3D and UV points.
               uvh = face.get_UVHelper(true, true, texture_writer)
-              samples.each { | position |
+              samples.each do | position |
                 xyz << position ### XYZ 3D coordinates
                 uvq = uvh.get_front_UVQ(position) ### UV 2D coordinates
                 uv << self.flattenUVQ(uvq)
-              }
+              end
 
               pts = [] ### Position texture.
 
@@ -537,79 +484,49 @@ class OBJexporter
 
         defmat = mat
         defmat = ci.material if ci.material
+
+        self.export_component_definition(ci.definition, ot, defmat)
+    end
+
+    def export_component_definition(definition, ot, defmat = nil)
         @used_materials << defmat
-        name = ci.definition.name
-        name = name+"-"+ci.entityID.to_s
-        name.gsub!(/[^0-9A-Za-z_-]/, "_")
-        objname = @title + "-COM-" + name
 
-        @msg << '. '; Sketchup.set_status_text(@msg)
+        self.export_entities(definition.entities, ot, defmat)
+    end
 
-        faces = ci.definition.entities.find_all { | e |
-            e.class == Sketchup::Face
-        }
-
-        log('Export Components', 'Faces: ' + faces.to_s)
-
+    def export_entities(entities, ot, defmat = nil)
+        faces = entities.find_all { | e | e.class == Sketchup::Face }
         if faces.length > 0
-            self.export_faces(faces, objname, ot, defmat)
+            self.export_faces(entities.parent, faces, ot, defmat)
         end
 
-        (ci.definition.entities.find_all{|e| e.class==Sketchup::Image}).each{|f| self.export_image(f, ot) }
-        (ci.definition.entities.find_all{|e| e.class==Sketchup::Group}).each{|f| self.export_group(f, ot, defmat) }
-        (ci.definition.entities.find_all{|e| e.class==Sketchup::ComponentInstance}).each{|f| self.export_component_instance(f, ot, defmat) }
-    end
-    
-    def export_image(img, tr=nil)
-        return if img.hidden? or not img.layer.visible?
-        defn=img.definition
-        return if not defn
-        face=nil
-        defn.entities.each{|e|
-          if e.class==Sketchup::Face
-            face=e
-            break
-          end#if
-        }
-        return if not face
-        tc=img.transformation
-        ###
-        tca=tc.to_a
-        ssx=tca[0].to_s
-        ssy=tca[5].to_s
-        ssz=tca[10].to_s
-        if ssx=="-0.0"
-          tca[0]= -0.000000001
+        groups = entities.find_all { | e | e.class == Sketchup::Group }
+        if groups.length > 0
+            groups.each { | g | self.export_group(g, ot, defmat) }
         end
-        if ssy=="-0.0"
-          tca[5]= -0.000000001
+
+        instances = entities.find_all { | e | e.class == Sketchup::ComponentInstance }
+        if instances.length > 0
+            instances.each { | i | self.export_component_instance(i, ot, defmat) }
         end
-        if ssz=="-0.0"
-          tca[10]= -0.000000001
-        end
-        tc=Geom::Transformation.new(tca)
-        ###
-        ot=tc
-        ot=tr*tc if tr!=nil
-        defmat=face.material
-        @used_materials << defmat
-        name=img.entityID.to_s
-        name.gsub!(/[^0-9A-Za-z_-]/, "_")
-        objname=@title+"-IMG-"+name
-        self.export_faces([face], objname, ot, defmat)
-        ###
     end
 
-    def export_faces(all_faces=[], objname="", tr=nil, defmat=nil)
+    def open_group(objname)
+        @obj_file.puts("g #{objname}")
+    end
+
+    def close_group()
+        @obj_file.flush()
+    end
+
+    def export_faces(parent, all_faces=[], tr=nil, defmat=nil)
         tr = Geom::Transformation.new() if tr == nil
 
-        @msg << '.'; Sketchup.set_status_text(@msg) ### do it by material per object
+        faces_grouped = all_faces.group_by do | f |
+            f.material
+        end
 
-        @all_mats.each { | mat |
-            faces = all_faces.find_all{ | face | face.material == mat }
-            next if not faces[0]
-
-            all_faces = all_faces - faces #todo(marrony): why this?
+        faces_grouped.each do | mat, faces |
             @used_materials << mat
 
             vs = []
@@ -622,9 +539,14 @@ class OBJexporter
             kUVQBack = 2
             kNormals = 4
 
-            faces.each { | face |
+            faces.each do | face |
                 next if face.hidden? or not face.layer.visible?
-                next if self.distorted?(face, objname, tr)
+
+                if self.distorted?(face, tr)
+                    log('Distorted', parent.name.to_s)
+                    next
+                end
+
                 mesh = face.mesh(kPoints | kUVQFront | kNormals)
                 next if not mesh
 
@@ -634,29 +556,34 @@ class OBJexporter
 
                 f_vcount = 1; f_vcount = vs.length + 1 if vs[0]
 
-                polygons = mesh.polygons.map { | p |
+                polygons = mesh.polygons.map do | p |
                     indexes = p.map { | px | (f_vs.index(mesh.points[(px.abs-1)]) + f_vcount) }
                     #todo(marrony): fix the array of array
                     [ indexes ]
-                }
+                end
+
                 meshes.concat(polygons)
 
                 if f_vs
                   vs.concat(f_vs)
                 end
+
                 if f_uvs
                   uvs.concat(f_uvs)
                 end
+
                 if f_nos
                   nos.concat(f_nos)
                 end
-            }
+            end
 
             defn = faces[0].parent
 
             if not mat
               mat = defmat
               if defn != @model and defmat and defmat.texture
+                log('Export Faces', 'Remap?')
+
                 ### re-map - it's on an Instance/Group 
                 tgp = @model.active_entities.add_group()### we make exploded copy of it and map textures...
                 tents = tgp.entities
@@ -664,160 +591,47 @@ class OBJexporter
                 inst.explode
                 tents.to_a.each { | e | e.erase! if e.class == Sketchup::Face and e.material }
                 tents.to_a.each { | e | e.material = mat if e.class == Sketchup::Face}
-                self.export_faces(tents.find_all { | e | e.class == Sketchup::Face }, objname, tr, nil)
+                self.export_faces(parent, tents.find_all { | e | e.class == Sketchup::Face }, tr, nil)
                 tgp.erase!
               else
-                self.export_obj_file(objname, meshes, uvs, nos, vs, tr, mat)
+                self.export_obj_file(meshes, uvs, nos, vs, tr, mat)
               end
             else
-              self.export_obj_file(objname, meshes, uvs, nos, vs, tr, mat)
+              self.export_obj_file(meshes, uvs, nos, vs, tr, mat)
             end
-        }
-
-        self.process_distorted() if @distorted
+        end
     end
       
-    def distorted?(face=nil, objname="", tr=nil) ### check for distortion
+    def distorted?(face=nil, tr=nil) ### check for distortion
         return false if not face
+
         mat = face.material
         return false if not mat
 
         texture = mat.texture
         return false if not texture
 
-        mesh = face.mesh(5)###7=backs too
-        uvs = []
-        f_uvs = (1..mesh.count_points).map { | i | mesh.uv_at(i, 1) } ####1=front
-        uvs.concat(f_uvs) if f_uvs
-        disto = false
-        uvs.each { | uvq | disto = true if ((uvq.z.to_f)*1000).round != 1000 }
+        mesh = face.mesh(5) ###7=backs too
+        f_uvs = (1..mesh.count_points).map do | i |
+            mesh.uv_at(i, true)
+        end
 
-        @distorted << [face, objname, tr, mat] if disto
-        log('Distorted?', @distorted.to_s)
-
-        return disto
-    end
-    
-    def process_distorted()
-        @msg<<'.'; Sketchup.set_status_text(@msg)
-        @distorted.each{|a|
-          face=a[0]
-          objname=a[1]
-          tr=a[2]
-          mat=a[3]
-          next if not face or not mat
-          mesh=face.mesh(5)###7=backs too
-          next if not mesh
-          vs=[]
-          nos=[]
-          uvs=[]
-          meshes=[]
-          f_uvs=(1..mesh.count_points).map{|i|mesh.uv_at(i, 1)}####1=front
-          f_vs=[]
-          f_vs=(1..mesh.count_points).map{|i|mesh.points[i-1]}
-          f_nos=[]
-          f_nos=(1..mesh.count_points).map{|i|mesh.normal_at(i)}
-          f_vcount=1; f_vcount=vs.length + 1 if vs[0]
-          meshes.concat(mesh.polygons.map{|p| [p.map{|px|(f_vs.index(mesh.points[(px.abs-1)]) + f_vcount)}] })
-          ###
-          vs.concat(f_vs) if f_vs
-          uvs.concat(f_uvs) if f_uvs
-         if uvs
-          i=0; uvs.each{
-            next if not uvs[i]
-            j=i
-            while j > 3
-              j=j-4
-            end
-            uvs[i].z=1
-            if j==0
-              uvs[i].x= 1
-              uvs[i].y= 1
-            elsif j==1
-              uvs[i].x= 0
-              uvs[i].y= 0
-            elsif j==2
-              uvs[i].x= 1
-              uvs[i].y= 0
-            else
-              uvs[i].x= 0
-              uvs[i].y= 1
-            end#if
-            i+=1
-          } if (vs[0].z >= vs[1].z and vs[0].z >= vs[2].z) or (vs[0].z <= vs[1].z and vs[0].z <= vs[2].z)
-          i=0; uvs.each{
-            next if not uvs[i]
-            j=i
-            while j > 3
-              j=j-4
-            end
-            uvs[i].z=1
-            if j==0
-              uvs[i].x= 0
-              uvs[i].y= 1
-            elsif j==1
-              uvs[i].x= 1
-              uvs[i].y= 0
-            elsif j==2
-              uvs[i].x= 1
-              uvs[i].y= 1
-            else
-              uvs[i].x= 0
-              uvs[i].y= 0
-            end#if
-            i+=1
-          } if (vs[0].z >= vs[1].z and vs[0].z <= vs[2].z)
-          i=0; uvs.each{
-            next if not uvs[i]
-            j=i
-            while j > 3
-              j=j-4
-            end
-            uvs[i].z=1
-            if j==0
-              uvs[i].x= 1
-              uvs[i].y= 0
-            elsif j==1
-              uvs[i].x= 0
-              uvs[i].y= 1
-            elsif j==2
-              uvs[i].x= 0
-              uvs[i].y= 0
-            else
-              uvs[i].x= 1
-              uvs[i].y= 1
-            end#if
-            i+=1
-          } if (vs[0].z <= vs[1].z and vs[0].z >= vs[2].z)
-         end#if
-          nos.concat(f_nos) if f_nos
-          dmatname = self.export_distorted_obj(objname, meshes, uvs, nos, vs, tr, mat)
-          gp=@model.active_entities.add_group(face) ### to stop deletion
-          face=nil
-          gp.entities.each{|e|
-            if e.class==Sketchup::Face
-              face=e
-              break
-            end
-          }
-          gp.hidden=true
-          @dmats << [face, mat, dmatname]
-        }
-        @distorted=[]
+        return f_uvs.any? do | uvq |
+            (uvq.z.to_f * 1000).round != 1000
+        end
     end
 
-    def _export_obj_file(objname="", meshes=[], uvs=[], nos=[], vs=[], tr=nil, mat_name=nil)
+    def export_obj_file(meshes=[], uvs=[], nos=[], vs=[], tr=nil, mat=nil)
+        return if not meshes
+
+        mat_name = self.find_material_name(mat)
+
         ot = Geom::Transformation.new()
         ot = tr if tr != nil
 
-        return if not meshes
-
-        objname = objname.gsub(/ /, '_').gsub(/[^0-9A-Za-z_-]/, '')
         if meshes.length != 0 and vs.length != 0
-            ###
-            @obj_file.puts("g #{objname}-#{mat_name}")
             @obj_file.puts("usemtl #{mat_name}")
-            ###
+
             kv = []
             kvt = []
             kvn = []
@@ -825,15 +639,13 @@ class OBJexporter
             vs_transformed = vs.map { | v | ot * v }
             min = vs_transformed[0]
 
-            vs_transformed.each { | v |
+            vs_transformed.each do | v |
                 min = v if v.x < min.x and v.y < min.y and v.z < min.z
-            }
+            end
 
-            log('Export Obj', vs_transformed.to_s)
-
-            vs.each { | v |
+            vs.each do | v |
                 v = ot * v
-                v = v - min
+                #v = v - min
                 xx = v.x
                 yy = v.y
                 zz = v.z
@@ -851,9 +663,9 @@ class OBJexporter
                 end
 
                 kv << @used_vs[newv]
-            }
+            end
 
-            uvs.each { | uv |
+            uvs.each do | uv |
                 newvt = "vt #{"%.12g" % (uv.x)} #{"%.12g" % (uv.y)}"
                 i = @used_vts.length
 
@@ -863,9 +675,9 @@ class OBJexporter
                 end
 
                 kvt << @used_vts[newvt]
-            }
+            end
 
-            nos.each { | vnor |
+            nos.each do | vnor |
                 nor = ot * vnor
                 nor.normalize!
 
@@ -885,105 +697,92 @@ class OBJexporter
                 end
 
                 kvn << @used_vns[newvn]
-            }
+            end
 
-            log('Export Faces', 'Meshes ' + meshes.to_s)
-
-            meshes.each { | mesh |
+            meshes.each do | mesh |
                 f_str = "f"
-                mesh.each { | pg |
-                    pg.each { | i |
+                mesh.each do | pg |
+                    pg.each do | i |
                         kvv = kv[i-1]
                         kvtt = kvt[i-1]
                         kvnn = kvn[i-1]
                         f_str << " #{kvv}/#{kvtt}/#{kvnn}"
-                    }
+                    end
 
                     @obj_file.puts(f_str)
-                }
-            }
+                end
+            end
 
             @obj_file.puts
         end
     end
 
-    def export_obj_file(objname="", meshes=[], uvs=[], nos=[], vs=[], tr=nil, mat=nil)
-        if mat
-          mat_name = ""
-          (@mats + @imgs).each { | ar |
-            (mat_name = ar[1]; break) if ar[0] == mat
-          }
-        else
-          mat_name = "Default_Material"
-        end
-
-        self._export_obj_file(objname, meshes, uvs, nos, vs, tr, mat_name)
-    end
-    
-    def export_distorted_obj(objname="", meshes=[], uvs=[], nos=[], vs=[], tr=nil, mat=nil)
-        if mat
-            mat_name = mat.display_name.gsub(/ /, '_').gsub(/[^0-9A-Za-z_-]/, '')
-            saved_name = File.basename(mat_name)
-            saved_name_uniq = self.make_name_unique(@saved_names, saved_name)
-            @saved_names << saved_name_uniq
-            matname = saved_name_uniq # we always uniquify distorts
-        else
-            matname = "Default_Material" ### should never happen !
-        end
-
-        self._export_obj_file(objname, meshes, uvs, nos, vs, tr, matname)
-
-        return matname
-    end
-    
     def make_texture_folder()
         begin
           Dir.mkdir(@textures_path) if not File.exist?(@textures_path)
         rescue
-          UI.messagebox(@textures_path+" ??")
+          UI.messagebox(@textures_path + " ??")
         end
     end
     
     def export_textures()
-        txtr=false
-        @used_materials.compact.uniq.each{|mat|
-          if mat.texture
-            txtr=true
-            break
-          end
-        }
+        log('Export Textures', @used_materials.to_s)
+
+        txtr = @used_materials.compact.uniq.any? do | mat |
+            mat.texture != nil
+        end
+
         return unless txtr
+
         self.make_texture_folder()
-        temp_group=@model.active_entities.add_group()
-        tw=Sketchup.create_texture_writer
-        @all_mats.each{|mat|
+        temp_group = @model.active_entities.add_group()
+        tw = Sketchup.create_texture_writer
+
+        @all_mats.each do | mat |
             next if not mat
             next if not @used_materials.include?(mat)
             if mat.texture 
-                @msg<<'.'; Sketchup.set_status_text(@msg)
-                temp_group.material=mat
-                mat_texture_file=mat.texture.filename.tr("\\", "/")
+                temp_group.material = mat
+                mat_texture_file = mat.texture.filename.tr("\\", "/")
+
                 if @png
-                  texture_extn='.PNG'
+                  texture_extn = '.PNG'
                 else
-                  texture_extn=File.extname(mat_texture_file)
-                  texture_extn='.PNG' if texture_extn.empty?
-                  itypes=['.png','.jpg','.bmp','.tif','.psd','.tga']
-                  texture_extn='.PNG' unless itypes.include?(texture_extn.downcase)
-                end#if
-                mat_name="";(@mats+@imgs).each{|ar|(mat_name=ar[1];break) if ar[0]==mat}
-                mat_texture_name=mat_name+texture_extn
-                tpath=File.join(@textures_path, mat_texture_name)
+                  texture_extn = File.extname(mat_texture_file)
+                  texture_extn = '.PNG' if texture_extn.empty?
+                  itypes = ['.png','.jpg','.bmp','.tif','.psd','.tga']
+                  texture_extn = '.PNG' unless itypes.include?(texture_extn.downcase)
+                end
+
+                mat_name = ""
+                @mats.each do | ar |
+                    if ar[0] == mat
+                        mat_name = ar[1]
+                        break
+                    end
+                end
+
+                mat_texture_name = mat_name + texture_extn
+                tpath = File.join(@textures_path, mat_texture_name)
                 tw.load(temp_group)
                 tw.write(temp_group, tpath)
-            end#if
-        }#end.each
+            end
+        end
+
         temp_group.erase! if temp_group.valid?
     end
 
+    def find_material_name(mat)
+        mat_name = @mats.find do | ar |
+            ar[0] == mat
+        end
+
+        return "Default_Material" if not mat_name
+
+        return mat_name[1]
+    end
+
     def export_mtl_material()
-        @msg<<'.'
-        Sketchup.set_status_text(@msg)
         ffcol=@model.rendering_options["FaceFrontColor"]
         mtl_file=File.new(@mtl_file,"w")
         mtl_file.puts("# Alias Wavefront MTL File Exported from SketchUp")
@@ -998,12 +797,13 @@ class OBJexporter
         mtl_file.puts("d 1")
         mtl_file.puts("Tr 1")
         mtl_file.puts
-        saved_names=[]
+
         @used_materials.uniq!
         @used_materials.each{|mat|
             next if not mat
-            @msg<<'.'; Sketchup.set_status_text(@msg)
-            matname="";(@mats+@imgs).each{|ar|(matname=ar[1];break) if ar[0]==mat}
+
+            matname = self.find_material_name(mat)
+
             if mat and mat.texture
                 if @png
                   texture_extn='.PNG'
@@ -1012,8 +812,9 @@ class OBJexporter
                   texture_extn='.PNG' if texture_extn.empty?
                   itypes=['.png','.jpg','.bmp','.tif','.psd','.tga']
                   texture_extn='.PNG' unless itypes.include?(texture_extn.downcase)
-                end#if
-                texture_path=File.join(@textures_name, matname + texture_extn)
+                end
+
+                texture_path = File.join(@textures_name, matname + texture_extn)
             end
 
             self.append_mtl(mtl_file, mat, matname, texture_path)
@@ -1032,8 +833,6 @@ class OBJexporter
         mtl_file.puts("#Distorted-Textures\n")
         ###
         @dmats.each{|ar|
-            @msg<<'.'
-            Sketchup.set_status_text(@msg)
             face=ar[0]
             mat=ar[1]
             matname=ar[2]
@@ -1085,11 +884,11 @@ class OBJexporter
     
     def make_name_unique(saved_names=[], saved_name="")
         if saved_names.include?(saved_name)
-            counter=1
+            counter = 1
             while counter < 10000
-                new_name=File.basename(saved_name, ".*") + counter.to_s + File.extname(saved_name)
+                new_name = File.basename(saved_name, ".*") + counter.to_s + File.extname(saved_name)
                 return new_name if not saved_names.include?(new_name)
-                counter+=1
+                counter += 1
             end
         end
         return saved_name
