@@ -206,6 +206,7 @@ class OBJexporter
         end
 
         ot = Geom::Transformation.new()
+
         definitions.uniq.each do | d |
             objname = @title + "-" + d.name
 
@@ -219,24 +220,35 @@ class OBJexporter
       return Geom::Point3d.new(uvq.x / uvq.z, uvq.y / uvq.z, 1.0)
     end
 
-    def export_group(gp, tr = nil, mat = nil)
+    def export_group(gp, tr = nil, defmat = nil)
 #         gp.make_unique if gp.entities.parent.instances[1]
+
+        log('Group 1', defmat.to_s)
+        log('Group 2', gp.material.to_s)
+        log('Group 3', gp.definition.material.to_s)
 
         gp.locked = false
         tc = gp.transformation
 
-        self.export_component_definition(gp.definition, tc, tr, mat)
+        defmat = gp.material if gp.material != nil
+
+        self.export_component_definition(gp.definition, tc, tr, defmat)
     end
      
-    def export_component_instance(ci, tr = nil, mat = nil)
+    def export_component_instance(ci, tr = nil, defmat = nil)
         ci.locked = false
         tc = ci.transformation
 
-        self.export_component_definition(ci.definition, tc, tr, mat)
+        defmat = ci.material if ci.material != nil
+
+        self.export_component_definition(ci.definition, tc, tr, defmat)
     end
 
-    def export_component_definition(definition, tc, tr = nil, mat = nil)
+    def export_component_definition(definition, tc, tr = nil, defmat = nil)
         tca = tc.to_a
+
+        log('Transformation 1', tca.to_s)
+        log('Transformation 2', tr.to_a.to_s) if tr != nil
 
         if tca[0].to_s == "-0.0"
           tca[0] = -0.000000001
@@ -281,6 +293,8 @@ class OBJexporter
 
         #todo(marrony): looks like flipped is true when scale is negative, maybe remove this
         if flipped
+          log('Export', 'Flipped=True')
+
           texture_writer = Sketchup.create_texture_writer
 
           if definition.instances[1]
@@ -294,6 +308,11 @@ class OBJexporter
           end
 
           faces.each do | face |
+              log('Faces', face.vertices.to_s)
+              log('Faces', face.material)
+              log('Faces', face.back_material)
+
+              #fixme(marrony): this code is not correct
               if not face.material or face.material.texture == nil
                 face.back_material = face.material
                 face.reverse!
@@ -328,7 +347,6 @@ class OBJexporter
           end
         end
 
-        defmat = mat
         defmat = definition.material if definition.material
         @used_materials << defmat
 
@@ -418,30 +436,33 @@ class OBJexporter
                 end
             end
 
-            defn = faces[0].parent
+#             defn = faces[0].parent
+#
+#             if not mat
+#               mat = defmat
+#               if defn != @model and defmat and defmat.texture
+#                 #todo(marrony): Understand what this code is doing
+#
+#                 log('Export Faces', 'Remap?')
+#
+#                 ### re-map - it's on an Instance/Group
+#                 tgp = @model.active_entities.add_group()### we make exploded copy of it and map textures...
+#                 tents = tgp.entities
+#                 inst = tents.add_instance(defn, Geom::Transformation.new())
+#                 inst.explode
+#                 tents.to_a.each { | e | e.erase! if e.class == Sketchup::Face and e.material }
+#                 tents.to_a.each { | e | e.material = mat if e.class == Sketchup::Face}
+#                 self.export_faces(parent, tents.find_all { | e | e.class == Sketchup::Face }, tr, nil)
+#                 tgp.erase!
+#               else
+#                 self.export_obj_file(meshes, uvs, nos, vs, tr, mat)
+#               end
+#             else
 
-            if not mat
-              mat = defmat
-              if defn != @model and defmat and defmat.texture
-                #todo(marrony): Understand what this code is doing
+              mat = defmat if not mat
 
-                log('Export Faces', 'Remap?')
-
-                ### re-map - it's on an Instance/Group 
-                tgp = @model.active_entities.add_group()### we make exploded copy of it and map textures...
-                tents = tgp.entities
-                inst = tents.add_instance(defn, Geom::Transformation.new())
-                inst.explode
-                tents.to_a.each { | e | e.erase! if e.class == Sketchup::Face and e.material }
-                tents.to_a.each { | e | e.material = mat if e.class == Sketchup::Face}
-                self.export_faces(parent, tents.find_all { | e | e.class == Sketchup::Face }, tr, nil)
-                tgp.erase!
-              else
-                self.export_obj_file(meshes, uvs, nos, vs, tr, mat)
-              end
-            else
               self.export_obj_file(meshes, uvs, nos, vs, tr, mat)
-            end
+#             end
         end
     end
       
@@ -512,7 +533,8 @@ class OBJexporter
             end
 
             nos.each do | vnor |
-                nor = ot * vnor
+                #fixme(marrony): do the correct normal transformation
+                nor = tr * vnor
                 nor.normalize!
 
                 xx = nor.x
